@@ -121,6 +121,9 @@ class LoginModel(BaseModel):
     identificador: str
     password: str
 
+class EstadoModel(BaseModel):
+    estado_suscripcion: str
+
 @app.get("/")
 def home():
     return {"estado": "¡El servidor de Farmacia Valver en la nube con PostgreSQL está activo y operando con éxito! 🚀"}
@@ -132,6 +135,17 @@ def listar_profesionales():
         return {"exito": True, "profesionales": db}
     except Exception as e:
         return {"exito": False, "profesionales": {}, "msg": str(e)}
+
+@app.put("/profesionales/estado/{rif_cedula}")
+def actualizar_estado(rif_cedula: str, datos: EstadoModel):
+    db = cargar_db()
+    if rif_cedula not in db:
+        return {"exito": False, "msg": "Profesional no encontrado."}
+    
+    # Actualizar estado de suscripción
+    db[rif_cedula]["estado_suscripcion"] = datos.estado_suscripcion
+    guardar_en_db(rif_cedula, db[rif_cedula])
+    return {"exito": True, "msg": "Estado de suscripción actualizado correctamente."}
 
 @app.post("/auth/login")
 def login(datos: LoginModel):
@@ -148,7 +162,7 @@ def login(datos: LoginModel):
         if doc_id.lower() == identificador or usuario.get("correo", "").lower() == identificador:
             if usuario.get("password") == datos.password:
                 if usuario.get("estado_suscripcion", "activo") != "activo":
-                    return {"exito": False, "usuario": None, "msg": "Acceso suspendido."}
+                    return {"exito": False, "usuario": None, "msg": "Acceso suspendido por falta de pago."}
                 usuario_resp = usuario.copy()
                 usuario_resp["rol"] = "profesional"
                 return {"exito": True, "usuario": usuario_resp, "msg": "Autenticación exitosa."}
