@@ -102,7 +102,7 @@ def guardar_en_db(rif_cedula, datos_dict):
             pass
     db[rif_cedula] = datos_dict
     with open(DB_CLOUD_FILE, "w", encoding="utf-8") as f:
-        json.dump(db, f, ensure_ascii=False, indent+4)
+        json.dump(db, f, ensure_ascii=False, indent=4)
     return True
 
 class ProfesionalModel(BaseModel):
