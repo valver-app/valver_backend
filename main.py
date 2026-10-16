@@ -125,6 +125,14 @@ class LoginModel(BaseModel):
 def home():
     return {"estado": "¡El servidor de Farmacia Valver en la nube con PostgreSQL está activo y operando con éxito! 🚀"}
 
+@app.get("/profesionales/listar")
+def listar_profesionales():
+    try:
+        db = cargar_db()
+        return {"exito": True, "profesionales": db}
+    except Exception as e:
+        return {"exito": False, "profesionales": {}, "msg": str(e)}
+
 @app.post("/auth/login")
 def login(datos: LoginModel):
     db = cargar_db()
