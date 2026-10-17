@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, Header
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import os
@@ -8,6 +8,9 @@ import psycopg2
 from urllib.parse import urlparse
 
 app = FastAPI(title="Valver Cloud API")
+
+# Clave secreta para autorizar subidas a la API
+API_KEY_SECRET = os.environ.get("VALVER_API_KEY", "ValverSecretKey_2026_Secure!")
 
 # Carpeta pública para alojar los informes escaneables
 CARPETA_INFORMES = "informes_publicos"
@@ -135,17 +138,41 @@ class EstadoModel(BaseModel):
 def home():
     return {"estado": "¡El servidor de Farmacia Valver en la nube con PostgreSQL está activo y operando con éxito! 🚀"}
 
+# Endpoint blindado para subida de informes
 @app.post("/subir-informe")
-async def subir_informe(archivo: UploadFile = File(...)):
+async def subir_informe(
+    archivo: UploadFile = File(...),
+    x_valver_token: str = Header(None)
+):
+    # 1. Validar Token Secreto
+    if x_valver_token != API_KEY_SECRET:
+        raise HTTPException(status_code=401, detail="Acceso denegado: Token de autorización inválido.")
+
+    # 2. Validar extensión permitida
+    nombre_seguro = os.path.basename(archivo.filename)
+    extension = os.path.splitext(nombre_seguro)[1].lower()
+    if extension not in [".png", ".jpg", ".jpeg"]:
+        raise HTTPException(status_code=400, detail="Formato no permitido. Solo imágenes PNG o JPG.")
+
+    # 3. Validar tipo MIME
+    if archivo.content_type not in ["image/png", "image/jpeg", "image/jpg"]:
+        raise HTTPException(status_code=400, detail="Tipo de contenido no válido.")
+
+    # 4. Validar tamaño máximo (5 MB)
+    contenido = await archivo.read()
+    if len(contenido) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="El archivo excede el límite de 5 MB.")
+
+    # 5. Guardar archivo
     try:
-        ruta_guardado = os.path.join(CARPETA_INFORMES, archivo.filename)
+        ruta_guardado = os.path.join(CARPETA_INFORMES, nombre_seguro)
         with open(ruta_guardado, "wb") as buffer:
-            shutil.copyfileobj(archivo.file, buffer)
-        
-        url_publica = f"https://valverbackend-production.up.railway.app/informes/{archivo.filename}"
+            buffer.write(contenido)
+
+        url_publica = f"https://valverbackend-production.up.railway.app/informes/{nombre_seguro}"
         return {"exito": True, "url": url_publica}
     except Exception as e:
-        return {"exito": False, "msg": str(e)}
+        raise HTTPException(status_code=500, detail=f"Error interno guardando informe: {str(e)}")
 
 @app.get("/profesionales/listar")
 def listar_profesionales():
