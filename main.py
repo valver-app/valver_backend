@@ -1,11 +1,18 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import os
+import shutil
 import json
 import psycopg2
 from urllib.parse import urlparse
 
 app = FastAPI(title="Valver Cloud API")
+
+# Carpeta pública para alojar los informes escaneables
+CARPETA_INFORMES = "informes_publicos"
+os.makedirs(CARPETA_INFORMES, exist_ok=True)
+app.mount("/informes", StaticFiles(directory=CARPETA_INFORMES), name="informes")
 
 # Obtener la URL de PostgreSQL desde las variables de entorno de Railway
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -127,6 +134,18 @@ class EstadoModel(BaseModel):
 @app.get("/")
 def home():
     return {"estado": "¡El servidor de Farmacia Valver en la nube con PostgreSQL está activo y operando con éxito! 🚀"}
+
+@app.post("/subir-informe")
+async def subir_informe(archivo: UploadFile = File(...)):
+    try:
+        ruta_guardado = os.path.join(CARPETA_INFORMES, archivo.filename)
+        with open(ruta_guardado, "wb") as buffer:
+            shutil.copyfileobj(archivo.file, buffer)
+        
+        url_publica = f"https://valverbackend-production.up.railway.app/informes/{archivo.filename}"
+        return {"exito": True, "url": url_publica}
+    except Exception as e:
+        return {"exito": False, "msg": str(e)}
 
 @app.get("/profesionales/listar")
 def listar_profesionales():
