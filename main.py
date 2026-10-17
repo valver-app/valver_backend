@@ -6,11 +6,16 @@ import shutil
 import json
 import psycopg2
 from urllib.parse import urlparse
+import bcrypt
 
 app = FastAPI(title="Valver Cloud API")
 
-# Clave secreta para autorizar subidas a la API
+# Clave secreta obtenida desde las variables de Railway (con respaldo seguro)
 API_KEY_SECRET = os.environ.get("VALVER_API_KEY", "ValverSecretKey_2026_Secure!")
+
+# Credenciales maestras obtenidas desde variables de entorno
+PASS_VALVER_MASTER = os.environ.get("MASTER_VALVER_PASS", "Vemeds237.")
+PASS_PRUEBAS_MASTER = os.environ.get("MASTER_PRUEBAS_PASS", "Vemeds236.")
 
 # Carpeta pública para alojar los informes escaneables
 CARPETA_INFORMES = "informes_publicos"
@@ -115,6 +120,21 @@ def guardar_en_db(rif_cedula, datos_dict):
         json.dump(db, f, ensure_ascii=False, indent=4)
     return True
 
+# Funciones de cifrado y verificación de contraseñas
+def hashear_password(password: str) -> str:
+    salt = bcrypt.gensalt(rounds=12)
+    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+
+def verificar_password(password_plana: str, password_almacenada: str) -> bool:
+    try:
+        # Si ya está hasheada con bcrypt (empieza por $2b$ o $2a$)
+        if password_almacenada.startswith("$2b$") or password_almacenada.startswith("$2a$"):
+            return bcrypt.checkpw(password_plana.encode("utf-8"), password_almacenada.encode("utf-8"))
+        # Retrocompatibilidad con contraseñas que estaban en texto plano
+        return password_plana == password_almacenada
+    except Exception:
+        return False
+
 class ProfesionalModel(BaseModel):
     nombres: str
     apellidos: str
@@ -188,7 +208,6 @@ def actualizar_estado(rif_cedula: str, datos: EstadoModel):
     if rif_cedula not in db:
         return {"exito": False, "msg": "Profesional no encontrado."}
     
-    # Actualizar estado de suscripción
     db[rif_cedula]["estado_suscripcion"] = datos.estado_suscripcion
     guardar_en_db(rif_cedula, db[rif_cedula])
     return {"exito": True, "msg": "Estado de suscripción actualizado correctamente."}
@@ -198,21 +217,24 @@ def login(datos: LoginModel):
     db = cargar_db()
     identificador = datos.identificador.strip().lower()
     
-    # Cuentas maestras del sistema
-    if identificador == "valver" and datos.password == "Vemeds237.":
+    # 1. Cuentas maestras protegidas con variables de entorno
+    if identificador == "valver" and datos.password == PASS_VALVER_MASTER:
         return {"exito": True, "usuario": {"rol": "admin", "empresa": "Farmacia Valver (Master)", "rif_cedula": "MASTER_VALVER", "correo": "admin@valver.com"}, "msg": "Master Ok."}
-    if identificador == "pruebas" and datos.password == "Vemeds236.":
+    if identificador == "pruebas" and datos.password == PASS_PRUEBAS_MASTER:
         return {"exito": True, "usuario": {"rol": "pruebas", "empresa": "Laboratorio Valver", "rif_cedula": "PRUEBAS_VALVER", "correo": "pruebas@valver.com"}, "msg": "Pruebas Ok."}
 
+    # 2. Cuentas de profesionales
     for doc_id, usuario in db.items():
         if doc_id.lower() == identificador or usuario.get("correo", "").lower() == identificador:
-            if usuario.get("password") == datos.password:
+            pass_almacenada = usuario.get("password", "")
+            if verificar_password(datos.password, pass_almacenada):
                 if usuario.get("estado_suscripcion", "activo") != "activo":
                     return {"exito": False, "usuario": None, "msg": "Acceso suspendido por falta de pago."}
                 usuario_resp = usuario.copy()
                 usuario_resp["rol"] = "profesional"
                 return {"exito": True, "usuario": usuario_resp, "msg": "Autenticación exitosa."}
             return {"exito": False, "usuario": None, "msg": "Contraseña incorrecta."}
+            
     return {"exito": False, "usuario": None, "msg": "Usuario no existe."}
 
 @app.post("/profesionales/registrar")
@@ -223,6 +245,8 @@ def registrar(datos: ProfesionalModel):
         return {"exito": False, "msg": "Cédula o RIF ya registrado."}
     
     nuevo_datos = datos.dict()
+    # Guardar contraseña hasheada irreversiblemente
+    nuevo_datos["password"] = hashear_password(datos.password)
     nuevo_datos["estado_suscripcion"] = "activo"
     guardar_en_db(doc_id, nuevo_datos)
     return {"exito": True, "msg": "Registro exitoso en la base de datos de la nube."}
